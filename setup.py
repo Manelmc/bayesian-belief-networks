@@ -1,4 +1,7 @@
-from distutils.core import setup
+try:
+    from setuptools import setup
+except ImportError:
+    from distutils.core import setup
 
 setup(
     name='Bayesian',
@@ -11,5 +14,4 @@ setup(
     license='LICENSE.txt',
     description='Bayesian Inference Engine using Factor Graphs.',
     long_description=open('README.txt').read(),
-    install_requires=[],
 )

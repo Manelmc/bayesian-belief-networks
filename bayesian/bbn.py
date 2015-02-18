@@ -10,12 +10,15 @@ from itertools import combinations, product
 from collections import defaultdict
 
 from prettytable import PrettyTable
+import numpy as np
 
 from bayesian import GREEN, NORMAL
 from bayesian.graph import Node, UndirectedNode, connect
 from bayesian.graph import Graph, UndirectedGraph
 from bayesian.utils import get_args, named_base_type_factory
 from bayesian.utils import get_original_factors
+from bayesian import random_dag as rnd
+from bayesian.MLE import *
 
 
 class BBNNode(Node):
@@ -783,6 +786,121 @@ def build_bbn_from_conditionals(conds):
         domains[variable_name] = node_func._domain
     return build_bbn(*node_funcs, domains=domains)
 
+class bnn_from_data():
+    def __init__(self, X, bin_size, max_parents, p_link):
+        self.max_parents = max_parents
+        self.p_link = p_link
+        self.names = [str(name) for name in X.columns.values]
+        self.graph_size = len(X.columns)
+        self.graph = rnd.newRandomDAG(self.graph_size, self.p_link, self.max_parents)
+        self.samples, self.bins = rnd.make_samples(X.as_matrix(), bin_size)
+        self.categories = np.repeat(bin_size, self.graph_size)
+        self.BIC = 0
+
+    def train(self, max_iter, learn_method, params = []):
+        '''Find the most likely bbn structure given
+        the data, by maximising the BIC.'''
+        self.BIC = computeBIC(self.graph, self.samples, self.categories)
+
+        if learn_method == 'hill_climber':
+            hill_climber(self, max_iter)
+        elif learn_method == 'sim_annealing':
+            simulatedAnnealing(self, params[0], params[1], max_iter)
+        elif learn_method == 'genetic_algorithm':
+            evolutionaryAlgorithm(self, max_iter, params[0], params[1], params[2], params[3])
+        else:
+            assert ValueError('The specified learning method does not exist.')
+
+    def convert_nodes_to_functions(self):
+        '''Converts the graph from adjacency matrix form
+        into form with functions as nodes.'''
+        # estimate CPT from data
+        CPT = CPT_from_data(self)
+        # convert to CPT dict
+        CPT_dict = make_CPT_dict(self, CPT)
+        # build graph from CPT dict
+        bbn = build_bbn_from_conditionals(CPT_dict)
+        return bbn
+
+def CPT_from_data(self):
+    CPT = []
+    affected_nodes = np.arange(0,self.graph_size)
+    combination_count, _ = getCombinations(self.graph, self.samples, self.categories, affected_nodes)
+    for key, node in combination_count.iteritems():
+        node = np.reshape(node,(-1,self.categories[key]))
+        CPT.append(node/node.sum(keepdims=True)[:,None][0])
+    return CPT
+
+def make_CPT_dict(self, CPT):
+    '''Creates the CPT dictionary which is needed for 
+    build_bbn_from_conditionals(), given a CPT in list form'''
+    CPT_dict = {}
+    names = self.names
+    for n, variable in enumerate(names):
+        parents=np.where(self.graph[n,:]==1)[0]
+        p1_char = 65 # start with A
+        cpt_count = 0
+
+        if not parents.any():
+            node_cat_dict = {}
+            node_cat_char = 65
+            for domain in CPT[n][0]:
+                node_cat_dict.update({chr(node_cat_char):domain})
+                node_cat_char +=1  
+            CPT_dict.update({variable:[[[], node_cat_dict]]})
+        else:
+            update_counter = np.repeat(1,len(parents))
+            par_pos = -1
+            total_count = 0
+            CPT_dict = dict_for_p_parents(parents, self.categories, update_counter, par_pos, variable, CPT_dict, CPT, total_count, n, names)
+    return CPT_dict
+
+def insertIntoDataStruct(variable, name_list, node_cat_dict, CPT_dict):
+    if not variable in CPT_dict:
+        CPT_dict[variable] = [[name_list,node_cat_dict]]
+    else:
+        CPT_dict[variable].append([name_list,node_cat_dict])
+
+def dict_for_p_parents(parents, categories, update_counter, par_pos, variable, CPT_dict, CPT, total_count, n, names):
+    '''Creating the CPT_dict if the node has no parents is trivial,
+    for p parents we need this recursive function.'''
+    if par_pos==-1:
+        other_parents = []
+        for p in range(len(parents)-1):
+            other_parents.append([names[parents[p]],chr(64+update_counter[p])])
+        for p_domain in range(categories[parents[-1]]):
+            node_cat_dict = {}
+            for i, domain in enumerate(CPT[n][total_count]):
+                node_cat_dict.update({chr(65+i):domain})
+            if other_parents:
+                name_list = [other_parents[0],[names[parents[par_pos]], chr(65+p_domain)]]
+            else:
+                name_list = [[names[parents[par_pos]], chr(65+p_domain)]]
+
+            insertIntoDataStruct(variable,name_list,node_cat_dict,CPT_dict)
+            total_count+=1
+
+        update_counter[par_pos]=categories[parents[par_pos]]
+        # go back to the next unfinished parent, set par_pos and reset update_counter for all parents in between
+        while par_pos>-len(parents):
+            par_pos-=1
+            if update_counter[par_pos]<categories[parents[par_pos]]:
+                break
+        if (update_counter==categories[parents]).all():
+            # if all updates are done return
+            return CPT_dict
+        else:
+            update_counter[par_pos+1:]=1
+            return dict_for_p_parents(parents, categories, update_counter, par_pos, variable, CPT_dict, CPT, total_count,n, names)
+    else:
+        if (update_counter==categories[parents]).all():
+            # if all updates are done return
+            return CPT_dict
+        else:
+            update_counter[par_pos]+=1
+            par_pos+=1
+            # call the function again
+            return dict_for_p_parents(parents, categories, update_counter, par_pos, variable, CPT_dict, CPT, total_count,n, names)
 
 def make_undirected_copy(dag):
     '''Returns an exact copy of the dag
