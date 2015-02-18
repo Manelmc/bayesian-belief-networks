@@ -17,8 +17,7 @@ from bayesian.graph import Node, UndirectedNode, connect
 from bayesian.graph import Graph, UndirectedGraph
 from bayesian.utils import get_args, named_base_type_factory
 from bayesian.utils import get_original_factors
-from bayesian import random_dag as rnd
-from bayesian.MLE import *
+from bayesian import structure_learning as sl
 
 
 class BBNNode(Node):
@@ -792,22 +791,26 @@ class bnn_from_data():
         self.p_link = p_link
         self.names = [str(name) for name in X.columns.values]
         self.graph_size = len(X.columns)
-        self.graph = rnd.newRandomDAG(self.graph_size, self.p_link, self.max_parents)
-        self.samples, self.bins = rnd.make_samples(X.as_matrix(), bin_size)
+        self.graph = sl.newRandomDAG(self.graph_size, self.p_link, self.max_parents)
+        self.samples, self.bins = sl.make_samples(X.as_matrix(), bin_size)
         self.categories = np.repeat(bin_size, self.graph_size)
         self.BIC = 0
 
     def train(self, max_iter, learn_method, params = []):
         '''Find the most likely bbn structure given
-        the data, by maximising the BIC.'''
-        self.BIC = computeBIC(self.graph, self.samples, self.categories)
+        the data, by maximising the BIC.
+        To test:
+        - can the algorithms recover the structure of an original graph 
+          from data that was sampled from that graph?
+        '''
+        self.BIC = sl.computeBIC(self.graph, self.samples, self.categories)
 
         if learn_method == 'hill_climber':
-            hill_climber(self, max_iter)
+            sl.hill_climber(self, max_iter)
         elif learn_method == 'sim_annealing':
-            simulatedAnnealing(self, params[0], params[1], max_iter)
+            sl.simulatedAnnealing(self, params[0], params[1], max_iter)
         elif learn_method == 'genetic_algorithm':
-            evolutionaryAlgorithm(self, max_iter, params[0], params[1], params[2], params[3])
+            sl.evolutionaryAlgorithm(self, max_iter, params[0], params[1], params[2], params[3])
         else:
             assert ValueError('The specified learning method does not exist.')
 
@@ -823,9 +826,17 @@ class bnn_from_data():
         return bbn
 
 def CPT_from_data(self):
+    '''Creates a list of arrays of CPTs for all nodes.
+    To test: 
+    - Do the probabilities of the node domains sum to 1?
+    - Are there as many domains as in the node's domain?
+    - Are there as many entries as combinations in the parents?
+    - Are the combination counts being mapped correctly to the
+    conditional probabilities?
+    '''
     CPT = []
     affected_nodes = np.arange(0,self.graph_size)
-    combination_count, _ = getCombinations(self.graph, self.samples, self.categories, affected_nodes)
+    combination_count, _ = sl.getCombinations(self.graph, self.samples, self.categories, affected_nodes)
     for key, node in combination_count.iteritems():
         node = np.reshape(node,(-1,self.categories[key]))
         CPT.append(node/node.sum(keepdims=True)[:,None][0])
@@ -833,7 +844,10 @@ def CPT_from_data(self):
 
 def make_CPT_dict(self, CPT):
     '''Creates the CPT dictionary which is needed for 
-    build_bbn_from_conditionals(), given a CPT in list form'''
+    build_bbn_from_conditionals(), given a CPT in list form
+    To test:
+    - Are the correct conditional probabilities mapped into the dictionary?
+    '''
     CPT_dict = {}
     names = self.names
     for n, variable in enumerate(names):
@@ -863,7 +877,10 @@ def insertIntoDataStruct(variable, name_list, node_cat_dict, CPT_dict):
 
 def dict_for_p_parents(parents, categories, update_counter, par_pos, variable, CPT_dict, CPT, total_count, n, names):
     '''Creating the CPT_dict if the node has no parents is trivial,
-    for p parents we need this recursive function.'''
+    for p parents we need this recursive function.
+    To test:
+    - Does it actually work correctly for p parents?
+    '''
     if par_pos==-1:
         other_parents = []
         for p in range(len(parents)-1):
