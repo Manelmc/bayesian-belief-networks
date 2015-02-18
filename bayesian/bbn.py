@@ -837,9 +837,12 @@ def CPT_from_data(self):
     CPT = []
     affected_nodes = np.arange(0,self.graph_size)
     combination_count, _ = sl.getCombinations(self.graph, self.samples, self.categories, affected_nodes)
-    for key, node in combination_count.iteritems():
-        node = np.reshape(node,(-1,self.categories[key]))
-        CPT.append(node/node.sum(keepdims=True)[:,None][0])
+    for n, node in combination_count.iteritems():
+        node = np.reshape(node,(-1,self.categories[n]))
+        probs = node/node.sum(axis=1)[:,None]
+        if np.isnan(probs).any():
+            probs[np.isnan(probs)] = 1/self.categories[n]
+        CPT.append(probs)
     return CPT
 
 def make_CPT_dict(self, CPT):
