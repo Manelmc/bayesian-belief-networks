@@ -17,7 +17,7 @@ from bayesian.graph import Node, UndirectedNode, connect
 from bayesian.graph import Graph, UndirectedGraph
 from bayesian.utils import get_args, named_base_type_factory
 from bayesian.utils import get_original_factors
-from bayesian import structure_learning as sl
+from bayesian import structure_learning_old as sl
 
 
 class BBNNode(Node):
