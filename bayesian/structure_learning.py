@@ -6,28 +6,28 @@ import pandas as pd
 import copy as cp
 
 class Graph:
-    """docstring for ClassName"""
+
     def __init__(self, names, p_link, max_parents, bin_size):
         self.names = names
-        self.graph_size = len(names)
+        self.size = len(names)
         self.p_link = p_link
         self.max_parents = max_parents
 
-        self.adj_matrix = np.zeros((self.graph_size, self.graph_size))
+        self.adj_matrix = np.zeros((self.size, self.size))
         self.new_rnd()
-        self.categories = np.repeat(bin_size, self.graph_size)
+        self.categories = np.repeat(bin_size, self.size)
 
         self.nodes_w_changed_BIC = []
 
     def is_DAG(self):
         return strongly_connected_components(self.adj_matrix) == []
 
-    def BIC(self, X):
-        return compute_BIC(self, X)
+    def BIC(self, X, BIC_old = []):
+        return compute_BIC(self, X, BIC_old)
 
     def new_rnd(self):
-        for n in range(self.graph_size): 
-            for m in range(self.graph_size):
+        for n in range(self.size): 
+            for m in range(self.size):
                 linker = uniform(0, 1)
                 if (self.p_link > linker and 
                     n != m and 
@@ -43,13 +43,18 @@ class Graph:
                     if switcher == 1:
                         self.adj_matrix[n, m] = 0
                         self.adj_matrix[m, n] = 1
-        self.make_acyclic() 
+        try: 
+            self.make_acyclic()
+        except:
+            self.new_rnd() 
 
     def make_acyclic(self):
         cycles = strongly_connected_components(self.adj_matrix)
         self.last_changed_nodes = []
-
+        counter = 0
         while len(cycles) != 0:
+            counter += 1
+            assert counter < 20
             # delete one parent of one node in each cycle
             # per iteration
             for c in cycles:
@@ -71,13 +76,72 @@ class Graph:
             cycles = strongly_connected_components(self.adj_matrix)
 
     def add_edge(self):
-        pass
+        non_edges = np.where(self.adj_matrix == 0)
+        non_edges = zip(non_edges[0], non_edges[1])
+        non_edges = [ne for ne in non_edges if ne[0]!=ne[1]]
+
+        nr_non_edges = len(non_edges)
+
+        edge_to_add = randint(0, nr_non_edges - 1)
+
+        self.adj_matrix[non_edges[edge_to_add]] = 1
+
+        counter = 0
+
+        while not self.is_DAG() and counter < 20:
+            counter += 1
+            self.adj_matrix[non_edges[edge_to_add]] = 0
+
+            edge_to_add = randint(0, nr_non_edges - 1) 
+
+            self.adj_matrix[non_edges[edge_to_add]] = 1  
+
+        if self.is_DAG() and counter < 20:
+            self.nodes_w_changed_BIC.append(non_edges[edge_to_add][0])
+        else:
+            self.adj_matrix[non_edges[edge_to_add]] = 0
+
+
     def delete_edge(self):
-        pass
+        edges = np.where(self.adj_matrix == 1)
+        edges = zip(edges[0], edges[1])
+
+        nr_edges = len(edges)
+        assert nr_edges > 0, 'No edges in graph.'
+        edge_to_delete = randint(0, nr_edges - 1)
+
+        self.adj_matrix[edges[edge_to_delete]] = 0
+        self.nodes_w_changed_BIC.append(edges[edge_to_delete][1])
+
     def reverse_edge(self):
-        pass
-    def count_combinations(self):
-        pass
+        edges = np.where(self.adj_matrix == 1)
+        edges = zip(edges[0], edges[1])
+
+        nr_edges = len(edges)
+        assert nr_edges is not 0, 'No edges in graph.'
+
+        edge_to_reverse = randint(0, nr_edges - 1)
+
+        self.adj_matrix[edges[edge_to_reverse]] = 0
+        self.adj_matrix[edges[edge_to_reverse][::-1]] = 1
+
+        counter = 0
+        while not self.is_DAG() and counter < 20:
+            counter += 1
+            self.adj_matrix[edges[edge_to_reverse]] = 1
+            self.adj_matrix[edges[edge_to_reverse][::-1]] = 0  
+
+            edge_to_reverse = randint(0, nr_edges - 1) 
+
+            self.adj_matrix[edges[edge_to_reverse]] = 0
+            self.adj_matrix[edges[edge_to_reverse][::-1]] = 1  
+
+        if self.is_DAG() and counter < 20:
+            self.nodes_w_changed_BIC.append(list(edges[edge_to_reverse])[0])
+        else:
+            self.adj_matrix[edges[edge_to_reverse]] = 1
+            self.adj_matrix[edges[edge_to_reverse][::-1]] = 0 
+        
 
 def strongly_connected_components(graph):
     """
@@ -126,78 +190,92 @@ def strongly_connected_components(graph):
     
     return cycles
 
-def count_combinations(self, X):
+def count_combinations(graph, X):
+    '''
+    N_ijk: Number 
+    q_i: Number of domain-combinations of parents of node i
 
-    combinationsList={}
-    numberOfCombinationsList={}
+    '''
+
+    N_ijk = {}
+    q_i = {}
         
-    for node in self.nodes_w_changed_BIC:
-        Parents=np.where(self.adj_matrix[node,:]==1)[0]
-        #get the number of combinations by computing the product of categories in the parents
-        numberOfCombinations = np.prod(self.categories[Parents])
-        numberOfCombinationsList.update({node:numberOfCombinations})
-        numberOfCombinationsIncludingNode=numberOfCombinations*self.categories[node]
-        combinationCountsNode=np.zeros(numberOfCombinationsIncludingNode)
+    for node in graph.nodes_w_changed_BIC:
+        parents = np.where(graph.adj_matrix[node, :] == 1)[0]
 
-        for samplePieceN in X:
-            #get the combinationNr for one node in sample n
-            combinationNr=0
-            for index,parent in enumerate(Parents):
-                if index==0:
-                    combinationNr=samplePieceN[parent]*self.categories[node]
-                    catParentOld=self.categories[parent]*self.categories[node]
+        q_i.update({node:np.prod(graph.categories[parents])})
+
+        combination_counts = np.zeros(q_i[node] * graph.categories[node])
+
+        for sample in X:
+            combination_nr = 0
+            for p, parent in enumerate(parents):
+                if p == 0:
+                    combination_nr = sample[parent] * graph.categories[node]
+                    cat_prev_p = graph.categories[parent] * graph.categories[node]
                 else:
-                    combinationNr+=samplePieceN[parent]*catParentOld
-                    catParentOld*=self.categories[parent]
+                    combination_nr += sample[parent] * cat_prev_p
+                    cat_prev_p *= graph.categories[parent]
 
-            combinationNr=combinationNr+samplePieceN[node]
-            combinationCountsNode[combinationNr]+=1
+            combination_nr = combination_nr + sample[node]
+            combination_counts[combination_nr] += 1
 
-        combinationsList.update({node:combinationCountsNode})
+        N_ijk.update({node:combination_counts})
 
-    return combinationsList,numberOfCombinationsList
+    return N_ijk, q_i
 
 
-def compute_BIC(self, X, BIC_old=[]):
-# compute the Bayesian Information Criterion for a graph, given data
-    if self.nodes_w_changed_BIC == []:
-        self.nodes_w_changed_BIC = np.arange(0, self.graph_size)
-        BIC_new = np.zeros(len(self.nodes_w_changed_BIC))
+def compute_BIC(graph, X, BIC_old = []):
+    '''compute the Bayesian Information Criterion for a graph, 
+    given data. Old BIC can be passed to speed up computation.'''
+
+    if graph.nodes_w_changed_BIC == []:
+        graph.nodes_w_changed_BIC = np.arange(0, graph.size)
+        BIC_new = np.zeros(len(graph.nodes_w_changed_BIC))
     else:
         BIC_new = np.copy(BIC_old)
 
-    Nijk, qi = count_combinations(self, X)
-    Nij = {}
-    for node in Nijk:
-        nodeNij=[]
-        index=0
-        for i in range(qi[node]):
-            nodeNij.append(sum(Nijk[node][index:index+self.categories[node]]))
-            index += self.categories[node]
-        Nij.update({node:nodeNij})
+    N_ijk, q_i = count_combinations(graph, X)
 
-    LL={}
-    for node in self.nodes_w_changed_BIC:
-        index=0
-        LLNode=0
-        for combinationCount in range(len(Nij[node])):
-            for categoryCount in range(self.categories[node]):
-                if Nij[node][combinationCount]==0:
-                    Nij[node][combinationCount]=1
-                if Nijk[node][categoryCount+index]==0:
-                    Nijk[node][categoryCount+index]=1
-                LLNode+=Nijk[node][categoryCount+index]*math.log(Nijk[node][categoryCount+index]/Nij[node][combinationCount])
-            index+=self.categories[node]
-        LL.update({node:LLNode})
+    N_ij = {}
+    for node in N_ijk:
+        nodeN_ij = []
+        index = 0
 
-    self.categories=np.array(self.categories)
-    qi=np.array(qi.items())[:,1]    
+        for i in range(q_i[node]):
+            nodeN_ij.append(sum(N_ijk[node][index:index + graph.categories[node]]))
+            index += graph.categories[node]
 
-    complexityPenalty=0.5*math.log(len(X))*abs((self.categories[self.nodes_w_changed_BIC]-1)*qi)
-    for index, node in enumerate(self.nodes_w_changed_BIC):
-        BIC_new[node]=LL[node]-complexityPenalty[index]
+        N_ij.update({node:nodeN_ij})
 
-    self.nodes_w_changed_BIC = []
+    LL = {}
+    for node in graph.nodes_w_changed_BIC:
+        index = 0
+        LL_node = 0
+        for combinationCount in range(len(N_ij[node])):
+            for categoryCount in range(graph.categories[node]):
+                if N_ij[node][combinationCount] == 0:
+                    N_ij[node][combinationCount] = 1
+
+                if N_ijk[node][categoryCount + index] == 0:
+                    N_ijk[node][categoryCount + index] = 1
+
+                LL_node += N_ijk[node][categoryCount + index] \
+                        * math.log(N_ijk[node][categoryCount + index]\
+                        / N_ij[node][combinationCount])
+
+            index += graph.categories[node]
+        LL.update({node:LL_node})
+
+    graph.categories = np.array(graph.categories)
+    q_i = np.array(q_i.items())[:,1]    
+
+    complexityPenalty = 0.5 * math.log(len(X)) * abs((graph.categories[graph.nodes_w_changed_BIC]-1) * q_i)
+
+    for index, node in enumerate(graph.nodes_w_changed_BIC):
+        BIC_new[node] = LL[node] - complexityPenalty[index]
+
+    graph.nodes_w_changed_BIC = []
 
     return BIC_new
 
@@ -207,13 +285,13 @@ def make_samples(X, bin_size):
     samples = np.empty(X.shape)
     bins = []
     for i, node in enumerate(X.T):
-        samples[:,i] = np.digitize(node, np.histogram(node, bins=bin_size)[1],right=True)-1
+        samples[:,i] = np.digitize(node, np.histogram(node, bins=bin_size)[1], right=True) - 1
         bins.append(np.histogram(node, bins=bin_size)[1])
     return samples, bins
 
 
 class StructureLearner:
-    """docstring for StructureLearner"""
+
     def __init__(self, graph, X, learn_method, max_iter):
 
         self.X = X
@@ -224,28 +302,27 @@ class StructureLearner:
     def learn(self):
         iteration = 0
         converged = False
+        patience = 10
         self.learn_method._setup(self.graph, self.X)
 
         while iteration < self.max_iter and not converged:
             iteration += 1
             self.learn_method.step()
+            if sum(self.learn_method.delta) == 0 and iteration > patience: 
+                converged = True
+                print 'Converged after %d iterations.'%iteration
+
+        print sum(self.learn_method.best_score)
         print self.learn_method.best_graph.adj_matrix
-        print self.learn_method.best_score
 
+class HillClimber():
+    """Add, delete or reverse an edge.
+    If this improves the BIC save the graph. 
+    Stop after maximum number of iterations."""
 
-class LearningMethod:
-    def _setup(self):
-        raise NotImplementedError()
-
-    def step(self):
-        raise NotImplementedError()
-
-class HillClimbing(LearningMethod):
-    """ Add, delete or reverse an edge.
-        If this improves the BIC save the graph. 
-        Stop after maximum number of iterations."""
     def __init__(self):
-        pass
+        self.n_delete_fails = 0
+        self.delta = 0
 
     def _setup(self, graph, X):
         self.X = X
@@ -258,27 +335,34 @@ class HillClimbing(LearningMethod):
         mode = randint(1, 3)
 
         if mode == 1:
-            self.new_graph.delete_edge()
-        elif mode == 2:
             self.new_graph.add_edge()
+        elif mode == 2:
+            try:
+                self.new_graph.delete_edge()
+            except:
+                self.n_delete_fails += 1
+                self.new_graph.add_edge()
         elif mode == 3:
             self.new_graph.reverse_edge()
 
-        new_score = self.new_graph.BIC(self.X)
+        new_score = self.new_graph.BIC(self.X, self.best_score)
 
         if sum(new_score) > sum(self.best_score):
+            self.delta = abs(elf.best_score - new_score)
             self.best_score = new_score
             self.best_graph.adj_matrix = cp.copy(self.new_graph.adj_matrix)
 
 class SimulatedAnnealing(LearningMethod):
     """ Add, delete or reverse an edge.
         Accept the change if the BIC is better,
-        or if the BIC is worse with a certain
+        or if the BIC is worse with a decreasing
         changing acceptance probality"""
 
     def __init__(self, starting_temperature=1, alpha=0.95):
         self.temperature = starting_temperature
         self.alpha = alpha
+        self.n_delete_fails = 0
+        self.delta = 0
 
     def _setup(self, graph, X):
         self.X = X
@@ -287,72 +371,121 @@ class SimulatedAnnealing(LearningMethod):
         self.best_score = graph.BIC(X)
 
     def step(self):
+        assert self.n_delete_fails < 20, 'There is no causal relation between the variables.'
         self.new_graph.adj_matrix = cp.copy(self.best_graph.adj_matrix)
         mode = randint(1, 3)
         if mode == 1:
-            self.new_graph.delete_edge()
-        elif mode == 2:
             self.new_graph.add_edge()
+        elif mode == 2:
+            try:
+                self.new_graph.delete_edge()
+            except:
+                self.n_delete_fails += 1
+                offspring.add_edge()
         elif mode == 3:
             self.new_graph.reverse_edge()
 
-        new_score = self.new_graph.BIC(self.X)
+        new_score = self.new_graph.BIC(self.X, self.best_score)
 
         if sum(new_score) < sum(self.best_score):
             delta = abs(sum(new_score)) - abs(sum(self.best_score))
             p_accept = np.exp(-(delta) / self.temperature)
 
             if uniform(0, 1) < p_accept:
+                self.delta = abs(self.best_score - new_score)
                 self.best_score = new_score
                 self.best_graph.adj_matrix = cp.copy(self.new_graph.adj_matrix)  
         else:
+            self.delta = abs(self.best_score - new_score)
             self.best_score = new_score
             self.best_graph.adj_matrix = cp.copy(self.new_graph.adj_matrix)
 
         self.temperature *= self.alpha        
 
 class GeneticAlgorithm(LearningMethod):
-    """docstring for GeneticAlgorithm"""
-    def __init__(self, size_initial_population=20, nr_survivors=5, nr_crossovers=7, nr_mutations=8):
+    """Create an initial population of random graphs.
+    In each generation, let the best graphs remain 
+    in the population (=survivors). Mutate and crossover 
+    individual graphs from the survivors."""
+
+
+    def __init__(self, size_initial_population=40, nr_survivors=10,
+                 nr_crossovers=10, nr_mutations=20):
         self.size_population = size_initial_population
         self.nr_survivors = nr_survivors
         self.nr_crossovers = nr_crossovers
+        self.mutation_start = nr_survivors + nr_crossovers
         self.nr_mutations = nr_mutations
-        self.population = {}
-        self.pop_BICs = {}
-        self.pop_BICs_per_node = {} 
+        self.n_delete_fails = 0
+        self.delta = 0
 
-    def _setup(self):
+    def _setup(self, graph, X):
+        self.X = X
+        self.graph_size = graph.size
+        self.population = {}
+        self.population_BICs = np.empty((self.size_population, graph.size))
+
         for i in range(self.size_population):
-            self.population.update({i:Graph.new_rnd(self.graph_size)})
-            self.pop_BICs_per_node.update({i:self.population[i].BIC()})
-            self.pop_BICs.update({i:sum(self.pop_BICs_per_node[i])})
-        index_best = max(self.pop_BICs.iterkeys(), key=(lambda key: self.pop_BICs[key]))
-        self.best_score = self.pop_BICs[index_best]
+            new_graph =  cp.deepcopy(graph)
+            new_graph.new_rnd()
+            self.population.update({i:new_graph})
+            self.population_BICs[i, :] = self.population[i].BIC(X)
+
+        index_best = np.argmax(np.sum(self.population_BICs, 1))
+        self.best_score = self.population_BICs[index_best]
         self.best_graph = self.population[index_best]
 
+
     def step(self):
-        # the x best graphs survive unchanged
-        # cross over best nodes amongst survivors and random nodes from survivors until number of cross overs is reached
-        # mutate survivors until number of mutations is reached
-        pass
+        assert self.n_delete_fails < 20*self.size_population, 'There is no causal relation between the variables.'
+        self.select_fittest()
 
-if __name__ == '__main__':
-    data = pd.read_excel('../../../data_bnn.xlsx', 'data_1', index_col=None, na_values=['NA'])
-    data.dropna(inplace=True)
+        for c in range(self.nr_survivors, self.nr_survivors + self.nr_crossovers):
+            self.crossover(c)
 
-    names = [str(name) for name in data.columns.values]
+        for m in range(self.mutation_start, self.mutation_start + self.nr_mutations):
+            self.mutate(m)
 
-    bin_size = 3
-    max_parents = 2
-    p_link = 0.4
-    max_iter = 10
+        index_best = np.argmax(np.sum(self.population_BICs, 1))
+        new_score = self.population_BICs[index_best]
+        self.delta = abs(self.best_score - new_score)
+        self.best_score = new_score
+        self.best_graph = self.population[index_best]
 
-    graph = Graph(names, p_link, max_parents, bin_size)
-    X,_ = make_samples(data.as_matrix(), bin_size)
-    # learn_method = HillClimbing()
-    learn_method = SimulatedAnnealing()
-    SL = StructureLearner(graph, X, learn_method, max_iter)
-    SL.learn()
-
+    def select_fittest(self):
+        fittest_index = np.argpartition(np.sum(self.population_BICs, 1), -self.nr_survivors)[-self.nr_survivors:]
         
+        self.population.update({i: self.population[s] for i, s in enumerate(fittest_index)})
+
+        for i, s in enumerate(fittest_index):
+            self.population_BICs[i, :] = self.population_BICs[s, :]
+
+    def mutate(self, m):
+        parent_index = randint(0, self.nr_survivors - 1)
+
+        offspring = cp.deepcopy(self.population[parent_index])
+
+        mode = randint(1, 3)
+        if mode == 1:
+            offspring.add_edge()
+        elif mode == 2:
+            try:
+                offspring.delete_edge()
+            except:
+                self.n_delete_fails += 1
+                offspring.add_edge()
+        elif mode == 3:
+            try:
+                offspring.reverse_edge()
+            except:
+                offspring.add_edge()                
+
+        self.population.update({m: offspring})
+
+        self.population_BICs[m, :] = offspring.BIC(self.X, self.population_BICs[parent_index, :])
+
+    def crossover(self, c):
+        node_selection = np.random.choice(self.graph_size, self.graph_size)
+        for n, node in enumerate(node_selection):
+            self.population[c].adj_matrix[n, :] = self.population[node].adj_matrix[n, :]
+            self.population_BICs[c, n] = self.population_BICs[node, n]       

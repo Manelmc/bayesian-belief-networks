@@ -17,8 +17,7 @@ from bayesian.graph import Node, UndirectedNode, connect
 from bayesian.graph import Graph, UndirectedGraph
 from bayesian.utils import get_args, named_base_type_factory
 from bayesian.utils import get_original_factors
-from bayesian import structure_learning_old as sl
-
+import structure_learning as sl
 
 class BBNNode(Node):
 
@@ -785,34 +784,17 @@ def build_bbn_from_conditionals(conds):
         domains[variable_name] = node_func._domain
     return build_bbn(*node_funcs, domains=domains)
 
-class bnn_from_data():
-    def __init__(self, X, bin_size, max_parents, p_link):
-        self.max_parents = max_parents
-        self.p_link = p_link
-        self.names = [str(name) for name in X.columns.values]
-        self.graph_size = len(X.columns)
-        self.graph = sl.newRandomDAG(self.graph_size, self.p_link, self.max_parents)
-        self.samples, self.bins = sl.make_samples(X.as_matrix(), bin_size)
-        self.categories = np.repeat(bin_size, self.graph_size)
-        self.BIC = 0
-
-    def train(self, max_iter, learn_method, params = []):
-        '''Find the most likely bbn structure given
-        the data, by maximising the BIC.
-        To test:
-        - can the algorithms recover the structure of an original graph 
-          from data that was sampled from that graph?
-        '''
-        self.BIC = sl.computeBIC(self.graph, self.samples, self.categories)
-
-        if learn_method == 'hill_climber':
-            sl.hill_climber(self, max_iter)
-        elif learn_method == 'sim_annealing':
-            sl.simulatedAnnealing(self, params[0], params[1], max_iter)
-        elif learn_method == 'genetic_algorithm':
-            sl.evolutionaryAlgorithm(self, max_iter, params[0], params[1], params[2], params[3])
-        else:
-            assert ValueError('The specified learning method does not exist.')
+class bbn_from_data():
+    def __init__(self, graph, X):
+        self.sl_graph = graph
+        self.max_parents = graph.max_parents
+        self.p_link = graph.p_link
+        self.names = graph.names
+        self.graph_size = graph.size
+        self.graph = graph.adj_matrix
+        self.samples = X
+        self.categories = graph.categories
+        self.bbn = self.convert_nodes_to_functions()
 
     def convert_nodes_to_functions(self):
         '''Converts the graph from adjacency matrix form
@@ -835,13 +817,13 @@ def CPT_from_data(self):
     conditional probabilities?
     '''
     CPT = []
-    affected_nodes = np.arange(0,self.graph_size)
-    combination_count, _ = sl.getCombinations(self.graph, self.samples, self.categories, affected_nodes)
+    self.sl_graph.nodes_w_changed_BIC = np.arange(0, self.graph_size)
+    combination_count, _ = sl.count_combinations(self.sl_graph, self.samples)
     for n, node in combination_count.iteritems():
-        node = np.reshape(node,(-1,self.categories[n]))
-        probs = node/node.sum(axis=1)[:,None]
+        node = np.reshape(node,(-1, self.categories[n]))
+        probs = node / node.sum(axis = 1)[:, None]
         if np.isnan(probs).any():
-            probs[np.isnan(probs)] = 1/self.categories[n]
+            probs[np.isnan(probs)] = 1 / self.categories[n]
         CPT.append(probs)
     return CPT
 
@@ -854,7 +836,7 @@ def make_CPT_dict(self, CPT):
     CPT_dict = {}
     names = self.names
     for n, variable in enumerate(names):
-        parents=np.where(self.graph[n,:]==1)[0]
+        parents = np.where(self.graph[n, :] == 1)[0]
         p1_char = 65 # start with A
         cpt_count = 0
 
@@ -863,64 +845,68 @@ def make_CPT_dict(self, CPT):
             node_cat_char = 65
             for domain in CPT[n][0]:
                 node_cat_dict.update({chr(node_cat_char):domain})
-                node_cat_char +=1  
+                node_cat_char += 1  
             CPT_dict.update({variable:[[[], node_cat_dict]]})
         else:
-            update_counter = np.repeat(1,len(parents))
+            update_counter = np.repeat(1, len(parents))
             par_pos = -1
             total_count = 0
             CPT_dict = dict_for_p_parents(parents, self.categories, update_counter, par_pos, variable, CPT_dict, CPT, total_count, n, names)
     return CPT_dict
 
-def insertIntoDataStruct(variable, name_list, node_cat_dict, CPT_dict):
+def insert_into_struct(variable, name_list, node_cat_dict, CPT_dict):
     if not variable in CPT_dict:
         CPT_dict[variable] = [[name_list,node_cat_dict]]
     else:
         CPT_dict[variable].append([name_list,node_cat_dict])
 
-def dict_for_p_parents(parents, categories, update_counter, par_pos, variable, CPT_dict, CPT, total_count, n, names):
+def dict_for_p_parents(parents, categories, update_counter, par_pos,
+                       variable, CPT_dict, CPT, total_count, n, names):
     '''Creating the CPT_dict if the node has no parents is trivial,
     for p parents we need this recursive function.
     To test:
     - Does it actually work correctly for p parents?
     '''
-    if par_pos==-1:
+    if par_pos == -1:
         other_parents = []
-        for p in range(len(parents)-1):
-            other_parents.append([names[parents[p]],chr(64+update_counter[p])])
+        for p in range(len(parents) - 1):
+            other_parents.append([names[parents[p]],chr(64 + update_counter[p])])
         for p_domain in range(categories[parents[-1]]):
             node_cat_dict = {}
             for i, domain in enumerate(CPT[n][total_count]):
-                node_cat_dict.update({chr(65+i):domain})
+                node_cat_dict.update({chr(65 + i):domain})
             if other_parents:
-                name_list = [other_parents[0],[names[parents[par_pos]], chr(65+p_domain)]]
+                name_list = [other_parents[0],[names[parents[par_pos]], chr(65 + p_domain)]]
             else:
-                name_list = [[names[parents[par_pos]], chr(65+p_domain)]]
+                name_list = [[names[parents[par_pos]], chr(65 + p_domain)]]
 
-            insertIntoDataStruct(variable,name_list,node_cat_dict,CPT_dict)
-            total_count+=1
+            insert_into_struct(variable, name_list, node_cat_dict, CPT_dict)
+            total_count += 1
 
-        update_counter[par_pos]=categories[parents[par_pos]]
-        # go back to the next unfinished parent, set par_pos and reset update_counter for all parents in between
-        while par_pos>-len(parents):
-            par_pos-=1
-            if update_counter[par_pos]<categories[parents[par_pos]]:
+        update_counter[par_pos] = categories[parents[par_pos]]
+        # go back to the next unfinished parent, set par_pos 
+        # and reset update_counter for all parents in between
+        
+        while par_pos >- len(parents):
+            par_pos -= 1
+            if update_counter[par_pos] < categories[parents[par_pos]]:
                 break
-        if (update_counter==categories[parents]).all():
+        if (update_counter == categories[parents]).all():
             # if all updates are done return
             return CPT_dict
         else:
-            update_counter[par_pos+1:]=1
-            return dict_for_p_parents(parents, categories, update_counter, par_pos, variable, CPT_dict, CPT, total_count,n, names)
+            # recurse
+            update_counter[par_pos + 1:] = 1
+            return dict_for_p_parents(parents, categories, update_counter, par_pos, variable, CPT_dict, CPT, total_count, n, names)
     else:
-        if (update_counter==categories[parents]).all():
+        if (update_counter == categories[parents]).all():
             # if all updates are done return
             return CPT_dict
         else:
-            update_counter[par_pos]+=1
-            par_pos+=1
-            # call the function again
-            return dict_for_p_parents(parents, categories, update_counter, par_pos, variable, CPT_dict, CPT, total_count,n, names)
+            # recurse
+            update_counter[par_pos] += 1
+            par_pos += 1
+            return dict_for_p_parents(parents, categories, update_counter, par_pos, variable, CPT_dict, CPT, total_count, n, names)
 
 def make_undirected_copy(dag):
     '''Returns an exact copy of the dag
