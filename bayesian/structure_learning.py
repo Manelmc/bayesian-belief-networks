@@ -52,7 +52,7 @@ class Graph:
         cycles = strongly_connected_components(self.adj_matrix)
         self.last_changed_nodes = []
         counter = 0
-        while len(cycles) != 0:
+        while len(cycles) > 0:
             counter += 1
             assert counter < 20
             # delete one parent of one node in each cycle
@@ -186,8 +186,8 @@ def strongly_connected_components(graph):
         if node not in lowlinks:
             strongconnect(node)
 
-    cycles[:] = [x for x in cycles if len(x) > 1]
-    
+    cycles[:] = [x for x in cycles if len(x) > 1] 
+
     return cycles
 
 def count_combinations(graph, X):
@@ -298,6 +298,7 @@ class StructureLearner:
         self.graph = graph
         self.learn_method = learn_method
         self.max_iter = max_iter
+        self.score = 0
 
     def learn(self):
         iteration = 0
@@ -312,8 +313,11 @@ class StructureLearner:
                 converged = True
                 print 'Converged after %d iterations.'%iteration
 
-        print sum(self.learn_method.best_score)
-        print self.learn_method.best_graph.adj_matrix
+
+        self.graph = self.learn_method.best_graph
+        self.score = sum(self.learn_method.best_score)
+
+        print('BIC: %f'%self.score)
 
 class HillClimber():
     """Add, delete or reverse an edge.
@@ -345,6 +349,10 @@ class HillClimber():
         elif mode == 3:
             self.new_graph.reverse_edge()
 
+        # If there is a bi-directional connection, delete one at random
+
+        self.new_graph.clear_bi_dir
+
         new_score = self.new_graph.BIC(self.X, self.best_score)
 
         if sum(new_score) > sum(self.best_score):
@@ -352,7 +360,7 @@ class HillClimber():
             self.best_score = new_score
             self.best_graph.adj_matrix = cp.copy(self.new_graph.adj_matrix)
 
-class SimulatedAnnealing(LearningMethod):
+class SimulatedAnnealing():
     """ Add, delete or reverse an edge.
         Accept the change if the BIC is better,
         or if the BIC is worse with a decreasing
@@ -402,7 +410,7 @@ class SimulatedAnnealing(LearningMethod):
 
         self.temperature *= self.alpha        
 
-class GeneticAlgorithm(LearningMethod):
+class GeneticAlgorithm():
     """Create an initial population of random graphs.
     In each generation, let the best graphs remain 
     in the population (=survivors). Mutate and crossover 
@@ -477,8 +485,8 @@ class GeneticAlgorithm(LearningMethod):
         elif mode == 3:
             try:
                 offspring.reverse_edge()
-            except:
-                offspring.add_edge()                
+            except:                
+                offspring.add_edge()        
 
         self.population.update({m: offspring})
 
@@ -488,4 +496,14 @@ class GeneticAlgorithm(LearningMethod):
         node_selection = np.random.choice(self.graph_size, self.graph_size)
         for n, node in enumerate(node_selection):
             self.population[c].adj_matrix[n, :] = self.population[node].adj_matrix[n, :]
-            self.population_BICs[c, n] = self.population_BICs[node, n]       
+            self.population_BICs[c, n] = self.population_BICs[node, n]
+
+        # After crossing over, make sure the resulting graph is acyclic.
+        # Should that not be the case, try to make the graph acycic.
+        # If that fails create a new random graph.
+        if not self.population[c].is_DAG():
+            try: 
+                self.population[c].make_acyclic()
+            except:
+                self.population[c].new_rnd() 
+            self.population_BICs[c, :] = self.population[c].BIC(self.X)

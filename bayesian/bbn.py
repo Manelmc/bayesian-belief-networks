@@ -774,7 +774,6 @@ def make_node_func(variable_name, conditions):
     node_func.__name__ = 'f_' + variable_name
     return node_func
 
-
 def build_bbn_from_conditionals(conds):
     node_funcs = []
     domains = dict()
@@ -784,30 +783,19 @@ def build_bbn_from_conditionals(conds):
         domains[variable_name] = node_func._domain
     return build_bbn(*node_funcs, domains=domains)
 
-class bbn_from_data():
-    def __init__(self, graph, X):
-        self.sl_graph = graph
-        self.max_parents = graph.max_parents
-        self.p_link = graph.p_link
-        self.names = graph.names
-        self.graph_size = graph.size
-        self.graph = graph.adj_matrix
-        self.samples = X
-        self.categories = graph.categories
-        self.bbn = self.convert_nodes_to_functions()
 
-    def convert_nodes_to_functions(self):
-        '''Converts the graph from adjacency matrix form
-        into form with functions as nodes.'''
-        # estimate CPT from data
-        CPT = CPT_from_data(self)
-        # convert to CPT dict
-        CPT_dict = make_CPT_dict(self, CPT)
-        # build graph from CPT dict
-        bbn = build_bbn_from_conditionals(CPT_dict)
-        return bbn
+def build_bbn_from_data(graph, samples):
+    '''Given a graph in structure_learning format, and samples,
+    returns a graph with inference engine, where nodes are functions'''
 
-def CPT_from_data(self):
+    CPT = estimate_CPT_from_data(graph, samples)
+
+    CPT_dict = create_CPT_dict(graph, CPT)     
+
+    bbn = build_bbn_from_conditionals(CPT_dict)
+    return bbn
+
+def estimate_CPT_from_data(graph, samples):
     '''Creates a list of arrays of CPTs for all nodes.
     To test: 
     - Do the probabilities of the node domains sum to 1?
@@ -817,26 +805,26 @@ def CPT_from_data(self):
     conditional probabilities?
     '''
     CPT = []
-    self.sl_graph.nodes_w_changed_BIC = np.arange(0, self.graph_size)
-    combination_count, _ = sl.count_combinations(self.sl_graph, self.samples)
+    graph.nodes_w_changed_BIC = np.arange(0, graph.size)
+    combination_count, _ = sl.count_combinations(graph, samples)
     for n, node in combination_count.iteritems():
-        node = np.reshape(node,(-1, self.categories[n]))
+        node = np.reshape(node,(-1, graph.categories[n]))
         probs = node / node.sum(axis = 1)[:, None]
         if np.isnan(probs).any():
-            probs[np.isnan(probs)] = 1 / self.categories[n]
+            probs[np.isnan(probs)] = 1 / graph.categories[n]
         CPT.append(probs)
     return CPT
 
-def make_CPT_dict(self, CPT):
+def create_CPT_dict(graph, CPT):
     '''Creates the CPT dictionary which is needed for 
     build_bbn_from_conditionals(), given a CPT in list form
     To test:
     - Are the correct conditional probabilities mapped into the dictionary?
     '''
     CPT_dict = {}
-    names = self.names
+    names = graph.names
     for n, variable in enumerate(names):
-        parents = np.where(self.graph[n, :] == 1)[0]
+        parents = np.where(graph.adj_matrix[n, :] == 1)[0]
         p1_char = 65 # start with A
         cpt_count = 0
 
@@ -851,7 +839,7 @@ def make_CPT_dict(self, CPT):
             update_counter = np.repeat(1, len(parents))
             par_pos = -1
             total_count = 0
-            CPT_dict = dict_for_p_parents(parents, self.categories, update_counter, par_pos, variable, CPT_dict, CPT, total_count, n, names)
+            CPT_dict = dict_for_p_parents(parents, graph.categories, update_counter, par_pos, variable, CPT_dict, CPT, total_count, n, names)
     return CPT_dict
 
 def insert_into_struct(variable, name_list, node_cat_dict, CPT_dict):
@@ -870,12 +858,14 @@ def dict_for_p_parents(parents, categories, update_counter, par_pos,
     if par_pos == -1:
         other_parents = []
         for p in range(len(parents) - 1):
-            other_parents.append([names[parents[p]],chr(64 + update_counter[p])])
+            other_parents.append([names[parents[p]], chr(64 + update_counter[p])])
         for p_domain in range(categories[parents[-1]]):
             node_cat_dict = {}
             for i, domain in enumerate(CPT[n][total_count]):
                 node_cat_dict.update({chr(65 + i):domain})
-            if other_parents:
+            if len(other_parents) > 1:
+                name_list = other_parents+[[names[parents[par_pos]], chr(65 + p_domain)]]
+            elif len(other_parents) == 1:
                 name_list = [other_parents[0],[names[parents[par_pos]], chr(65 + p_domain)]]
             else:
                 name_list = [[names[parents[par_pos]], chr(65 + p_domain)]]
