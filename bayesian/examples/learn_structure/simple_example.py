@@ -26,6 +26,7 @@ if __name__ == '__main__':
     bin_size = 3
     max_parents = 2
     p_link = 0.7
+
     max_iter = 100
 
     size_initial_population = 20
@@ -33,29 +34,19 @@ if __name__ == '__main__':
     nr_crossovers = 8
     nr_mutations = 7
 
-    n_rnd_starts = 1
-
     X, bins = sl.make_samples(data, bin_size)
 
-    best_graph = sl.Graph(var_names, p_link, max_parents, bin_size)
-    best_score = float('-inf')
+    initial_graph = sl.Graph(var_names, p_link, max_parents, bin_size)
 
-    for i in range(n_rnd_starts):
-        graph = sl.Graph(var_names, p_link, max_parents, bin_size)
+    learn_method = sl.GeneticAlgorithm(
+                        size_initial_population,
+                        nr_survivors,
+                        nr_crossovers,
+                        nr_mutations)
 
-        learn_method = sl.GeneticAlgorithm(
-                            size_initial_population,
-                            nr_survivors,
-                            nr_crossovers,
-                            nr_mutations)
+    model = sl.StructureLearner(initial_graph, X, learn_method, max_iter)
+    model.learn()
 
-        model = sl.StructureLearner(graph, X, learn_method, max_iter)
-        model.learn()
-
-        if model.score > best_score:
-            best_score = model.score
-            best_graph = model.graph
-
-    bd = bg.build_bbn_from_data(best_graph, X)
+    bd = bg.build_bbn_from_data(model.graph, X)
 
     bd.q(var_1='A')
