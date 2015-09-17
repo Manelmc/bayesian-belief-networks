@@ -34,8 +34,6 @@ if __name__ == '__main__':
     nr_crossovers = 8
     nr_mutations = 7
 
-    X, bins = sl.make_samples(data, bin_size)
-
     initial_graph = sl.Graph(var_names, p_link, max_parents, bin_size)
 
     learn_method = sl.GeneticAlgorithm(
@@ -44,9 +42,13 @@ if __name__ == '__main__':
                         nr_crossovers,
                         nr_mutations)
 
-    model = sl.StructureLearner(initial_graph, X, learn_method, max_iter)
+    model = sl.StructureLearner(initial_graph, data, learn_method, max_iter)
     model.learn()
 
-    bd = bg.build_bbn_from_data(model.graph, X)
+    graphs, X_list, bins_list = model.separate_components()
 
-    bd.q(var_1='A')
+    for n, g in enumerate(graphs):
+        print g.adj_matrix
+        bd = bg.build_bbn_from_data(g, X_list[n])
+        bd.export('graph_%d.gv'%n)
+        bd.q()

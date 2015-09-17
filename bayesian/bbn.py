@@ -790,7 +790,11 @@ def build_bbn_from_data(graph, samples):
 
     CPT = estimate_CPT_from_data(graph, samples)
 
-    CPT_dict = create_CPT_dict(graph, CPT)     
+    CPT_dict = create_CPT_dict(graph, CPT)
+
+    # for variable_name, cond_tt in CPT_dict.items():
+    #     print variable_name
+    #     print cond_tt
 
     bbn = build_bbn_from_conditionals(CPT_dict)
     return bbn
@@ -825,10 +829,11 @@ def create_CPT_dict(graph, CPT):
     names = graph.names
     for n, variable in enumerate(names):
         parents = np.where(graph.adj_matrix[n, :] == 1)[0]
-        p1_char = 65 # start with A
-        cpt_count = 0
+        # print variable
+        # print parents
 
-        if not parents.any():
+        if not parents.size:
+            # print 'thinks it doesnt have parents'
             node_cat_dict = {}
             node_cat_char = 65
             for domain in CPT[n][0]:
@@ -836,6 +841,7 @@ def create_CPT_dict(graph, CPT):
                 node_cat_char += 1  
             CPT_dict.update({variable:[[[], node_cat_dict]]})
         else:
+            # print 'thinks it has parents'
             update_counter = np.repeat(1, len(parents))
             par_pos = -1
             total_count = 0
