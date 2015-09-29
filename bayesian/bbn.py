@@ -3,6 +3,7 @@ from __future__ import division
 import sys
 import copy
 import heapq
+import itertools
 
 from random import random, choice
 from StringIO import StringIO
@@ -792,10 +793,6 @@ def build_bbn_from_data(graph, samples):
 
     CPT_dict = create_CPT_dict(graph, CPT)
 
-    # for variable_name, cond_tt in CPT_dict.items():
-    #     print variable_name
-    #     print cond_tt
-
     bbn = build_bbn_from_conditionals(CPT_dict)
     return bbn
 
@@ -829,11 +826,8 @@ def create_CPT_dict(graph, CPT):
     names = graph.names
     for n, variable in enumerate(names):
         parents = np.where(graph.adj_matrix[n, :] == 1)[0]
-        # print variable
-        # print parents
 
         if not parents.size:
-            # print 'thinks it doesnt have parents'
             node_cat_dict = {}
             node_cat_char = 65
             for domain in CPT[n][0]:
@@ -841,68 +835,40 @@ def create_CPT_dict(graph, CPT):
                 node_cat_char += 1  
             CPT_dict.update({variable:[[[], node_cat_dict]]})
         else:
-            # print 'thinks it has parents'
-            update_counter = np.repeat(1, len(parents))
-            par_pos = -1
-            total_count = 0
-            CPT_dict = dict_for_p_parents(parents, graph.categories, update_counter, par_pos, variable, CPT_dict, CPT, total_count, n, names)
+            CPT_dict = dict_for_p_parents(parents, graph.categories, CPT,
+                                          names, n, CPT_dict, variable)
+
     return CPT_dict
 
-def insert_into_struct(variable, name_list, node_cat_dict, CPT_dict):
-    if not variable in CPT_dict:
-        CPT_dict[variable] = [[name_list,node_cat_dict]]
-    else:
-        CPT_dict[variable].append([name_list,node_cat_dict])
 
-def dict_for_p_parents(parents, categories, update_counter, par_pos,
-                       variable, CPT_dict, CPT, total_count, n, names):
-    '''Creating the CPT_dict if the node has no parents is trivial,
-    for p parents we need this recursive function.
-    To test:
-    - Does it actually work correctly for p parents?
-    '''
-    if par_pos == -1:
-        other_parents = []
-        for p in range(len(parents) - 1):
-            other_parents.append([names[parents[p]], chr(64 + update_counter[p])])
-        for p_domain in range(categories[parents[-1]]):
-            node_cat_dict = {}
-            for i, domain in enumerate(CPT[n][total_count]):
-                node_cat_dict.update({chr(65 + i):domain})
-            if len(other_parents) > 1:
-                name_list = other_parents+[[names[parents[par_pos]], chr(65 + p_domain)]]
-            elif len(other_parents) == 1:
-                name_list = [other_parents[0],[names[parents[par_pos]], chr(65 + p_domain)]]
-            else:
-                name_list = [[names[parents[par_pos]], chr(65 + p_domain)]]
+def dict_for_p_parents(parents, categories, CPT, names, n, CPT_dict, variable):
 
-            insert_into_struct(variable, name_list, node_cat_dict, CPT_dict)
-            total_count += 1
+    combinations = []
+    parent_names = [names[i] for i in parents]
 
-        update_counter[par_pos] = categories[parents[par_pos]]
-        # go back to the next unfinished parent, set par_pos 
-        # and reset update_counter for all parents in between
-        
-        while par_pos >- len(parents):
-            par_pos -= 1
-            if update_counter[par_pos] < categories[parents[par_pos]]:
-                break
-        if (update_counter == categories[parents]).all():
-            # if all updates are done return
-            return CPT_dict
+    for cats in [categories[i] for i in parents]:
+        this_cat = []
+        for c in range(65, 65 + cats):
+            this_cat.append(chr(c))
+
+        combinations.append(this_cat)
+
+    oi_la = list(itertools.product(*combinations))
+
+    for total_count, comb in enumerate(oi_la):
+        name_list =  [[v, c] for v, c in zip(parent_names, comb)]
+
+        node_cat_dict = {}
+        for i, domain in enumerate(CPT[n][total_count]):
+            node_cat_dict.update({chr(65 + i): domain})
+
+        if not variable in CPT_dict:
+            CPT_dict[variable] = [[name_list, node_cat_dict]]
         else:
-            # recurse
-            update_counter[par_pos + 1:] = 1
-            return dict_for_p_parents(parents, categories, update_counter, par_pos, variable, CPT_dict, CPT, total_count, n, names)
-    else:
-        if (update_counter == categories[parents]).all():
-            # if all updates are done return
-            return CPT_dict
-        else:
-            # recurse
-            update_counter[par_pos] += 1
-            par_pos += 1
-            return dict_for_p_parents(parents, categories, update_counter, par_pos, variable, CPT_dict, CPT, total_count, n, names)
+            CPT_dict[variable].append([name_list, node_cat_dict])
+
+    return CPT_dict
+
 
 def make_undirected_copy(dag):
     '''Returns an exact copy of the dag

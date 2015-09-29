@@ -1,15 +1,16 @@
 import numpy as np
 from random import *
-import sys
 import math
-import pandas as pd
 import copy as cp
+from scipy import sparse as sp
+
 
 class Graph:
 
     def __init__(self, names, p_link, max_parents, bin_size):
         self.names = names
         self.size = len(names)
+        self.bin_size = bin_size
         self.p_link = p_link
         self.max_parents = max_parents
 
@@ -19,10 +20,19 @@ class Graph:
 
         self.nodes_w_changed_BIC = []
 
+    def remove_nodes(self, node_indices):
+        all_nodes = np.arange(self.size)
+        ind_keep = [i for j, i in enumerate(all_nodes) if j not in node_indices]
+
+        self.names = list(self.names[i] for i in ind_keep)
+        self.adj_matrix = self.adj_matrix[np.ix_(ind_keep, ind_keep)]
+        self.categories = self.categories[np.ix_(ind_keep)]
+        self.size = len(self.names)
+
     def is_DAG(self):
         return strongly_connected_components(self.adj_matrix) == []
 
-    def BIC(self, X, BIC_old = []):
+    def BIC(self, X, BIC_old=[]):
         return compute_BIC(self, X, BIC_old)
 
     def new_rnd(self):
@@ -190,10 +200,11 @@ def strongly_connected_components(graph):
 
     return cycles
 
+
 def count_combinations(graph, X):
     '''
-    N_ijk: Number 
-    q_i: Number of domain-combinations of parents of node i
+    - N_ijk: The number of instances in the data in which X_i takes the k-th value and the parents of X_i take configuration j.
+    - q_i: Number of domain-combinations of parents of node i
 
     '''
 
@@ -289,16 +300,34 @@ def make_samples(X, bin_size):
         bins.append(np.histogram(node, bins=bin_size)[1])
     return samples, bins
 
+def find_connected_components(graph):
+    adj_list = []
+
+    for i in range(graph.size):
+        for j in range(graph.size):
+            if graph.adj_matrix[i, j] == 1:
+                adj_list.append([i, j])
+
+    i_indices, j_indices = zip(*adj_list)
+
+    sparse_matrix = sp.csr_matrix(
+        (np.ones(len(j_indices)), (i_indices, j_indices)),
+        shape=(graph.size, graph.size))
+
+    return sp.csgraph.connected_components(sparse_matrix)
+
 
 class StructureLearner:
 
-    def __init__(self, graph, X, learn_method, max_iter):
+    def __init__(self, graph, data, learn_method, max_iter):
 
-        self.X = X
+        self.data = data
         self.graph = graph
         self.learn_method = learn_method
         self.max_iter = max_iter
         self.score = 0
+
+        self.X, self.bins = make_samples(data, self.graph.bin_size)
 
     def learn(self):
         iteration = 0
@@ -318,6 +347,37 @@ class StructureLearner:
         self.score = sum(self.learn_method.best_score)
 
         print('BIC: %f'%self.score)
+
+    def separate_components(self):
+        """Sometimes, the learned structure will consist of multiple graphs.
+        In this case, we want to separate the components into separate graphs.
+        We also remove components with single nodes, as they do not hold any
+        valuable information"""
+        components = find_connected_components(self.graph)
+        graphs = []
+        X_list = []
+        bins_list = []
+        all_nodes = np.arange(self.graph.size)
+
+        values, indices = np.unique(components[1], return_index=True)
+        for val in values:
+            len_component = list(components[1]).count(val)
+            if len_component > 1:
+                i_new_graph = [k for k, v
+                               in enumerate(components[1])
+                               if v == val]
+                i_rem = [k for j, k
+                         in enumerate(all_nodes)
+                         if j not in i_new_graph]
+
+                new_graph = cp.deepcopy(self.graph)
+                new_graph.remove_nodes(i_rem)
+                graphs.append(new_graph)
+
+                X_list.append(self.X.T[np.ix_(i_new_graph)].T)
+                bins_list.append(list(self.bins[k] for k in i_new_graph))
+
+        return graphs, X_list, bins_list
 
 class HillClimber():
     """Add, delete or reverse an edge.
@@ -356,7 +416,7 @@ class HillClimber():
         new_score = self.new_graph.BIC(self.X, self.best_score)
 
         if sum(new_score) > sum(self.best_score):
-            self.delta = abs(elf.best_score - new_score)
+            self.delta = abs(self.best_score - new_score)
             self.best_score = new_score
             self.best_graph.adj_matrix = cp.copy(self.new_graph.adj_matrix)
 
@@ -389,7 +449,7 @@ class SimulatedAnnealing():
                 self.new_graph.delete_edge()
             except:
                 self.n_delete_fails += 1
-                offspring.add_edge()
+                self.new_graph.add_edge()
         elif mode == 3:
             self.new_graph.reverse_edge()
 
@@ -434,7 +494,7 @@ class GeneticAlgorithm():
         self.population_BICs = np.empty((self.size_population, graph.size))
 
         for i in range(self.size_population):
-            new_graph =  cp.deepcopy(graph)
+            new_graph = cp.deepcopy(graph)
             new_graph.new_rnd()
             self.population.update({i:new_graph})
             self.population_BICs[i, :] = self.population[i].BIC(X)
@@ -445,7 +505,8 @@ class GeneticAlgorithm():
 
 
     def step(self):
-        assert self.n_delete_fails < 20*self.size_population, 'There is no causal relation between the variables.'
+        assert self.n_delete_fails < 20*self.size_population,\
+            'There is no causal relation between the variables.'
         self.select_fittest()
 
         for c in range(self.nr_survivors, self.nr_survivors + self.nr_crossovers):
@@ -461,7 +522,11 @@ class GeneticAlgorithm():
         self.best_graph = self.population[index_best]
 
     def select_fittest(self):
-        fittest_index = np.argpartition(np.sum(self.population_BICs, 1), -self.nr_survivors)[-self.nr_survivors:]
+        """Selecting the fittest individuals means keeping the graphs
+        with the highest BIC. Those graphs are called survivors."""
+        fittest_index = np.argpartition(
+            np.sum(self.population_BICs, 1), -self.nr_survivors)\
+                [-self.nr_survivors:]
         
         self.population.update({i: self.population[s] for i, s in enumerate(fittest_index)})
 
@@ -469,6 +534,8 @@ class GeneticAlgorithm():
             self.population_BICs[i, :] = self.population_BICs[s, :]
 
     def mutate(self, m):
+        """We mutate randomly chosen survivors by adding, deleting or
+        reversing a randomly chosen edge"""
         parent_index = randint(0, self.nr_survivors - 1)
 
         offspring = cp.deepcopy(self.population[parent_index])
@@ -490,16 +557,21 @@ class GeneticAlgorithm():
 
         self.population.update({m: offspring})
 
-        self.population_BICs[m, :] = offspring.BIC(self.X, self.population_BICs[parent_index, :])
+        self.population_BICs[m, :] = offspring.BIC(self.X,
+            self.population_BICs[parent_index, :])
 
     def crossover(self, c):
+        """We crossover by choosing the parents of N nodes and merging
+        in random order."""
         node_selection = np.random.choice(self.graph_size, self.graph_size)
         for n, node in enumerate(node_selection):
-            self.population[c].adj_matrix[n, :] = self.population[node].adj_matrix[n, :]
+            self.population[c].adj_matrix[n, :] = \
+                self.population[node].adj_matrix[n, :]
+
             self.population_BICs[c, n] = self.population_BICs[node, n]
 
         # After crossing over, make sure the resulting graph is acyclic.
-        # Should that not be the case, try to make the graph acycic.
+        # Should that not be the case, try to make the graph acyclic.
         # If that fails create a new random graph.
         if not self.population[c].is_DAG():
             try: 
