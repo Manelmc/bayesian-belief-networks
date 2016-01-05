@@ -3,6 +3,7 @@ from random import *
 import math
 import copy as cp
 from scipy import sparse as sp
+import sys
 
 
 class Graph:
@@ -307,7 +308,6 @@ def find_connected_components(graph):
         for j in range(graph.size):
             if graph.adj_matrix[i, j] == 1:
                 adj_list.append([i, j])
-
     i_indices, j_indices = zip(*adj_list)
 
     sparse_matrix = sp.csr_matrix(
@@ -340,13 +340,14 @@ class StructureLearner:
             self.learn_method.step()
             if sum(self.learn_method.delta) == 0 and iteration > patience: 
                 converged = True
-                print 'Converged after %d iterations.'%iteration
+                # print 'Converged after %d iterations.'%iteration
+                # sys.stdout.flush()
 
 
         self.graph = self.learn_method.best_graph
         self.score = sum(self.learn_method.best_score)
 
-        print('BIC: %f'%self.score)
+        # print('BIC: %f'%self.score)
 
     def separate_components(self):
         """Sometimes, the learned structure will consist of multiple graphs.
@@ -386,7 +387,7 @@ class HillClimber():
 
     def __init__(self):
         self.n_delete_fails = 0
-        self.delta = 0
+        self.delta = [0]
 
     def _setup(self, graph, X):
         self.X = X
@@ -424,13 +425,13 @@ class SimulatedAnnealing():
     """ Add, delete or reverse an edge.
         Accept the change if the BIC is better,
         or if the BIC is worse with a decreasing
-        changing acceptance probality"""
+        changing acceptance probability"""
 
     def __init__(self, starting_temperature=1, alpha=0.95):
         self.temperature = starting_temperature
         self.alpha = alpha
         self.n_delete_fails = 0
-        self.delta = 0
+        self.delta = [0]
 
     def _setup(self, graph, X):
         self.X = X
@@ -485,7 +486,7 @@ class GeneticAlgorithm():
         self.mutation_start = nr_survivors + nr_crossovers
         self.nr_mutations = nr_mutations
         self.n_delete_fails = 0
-        self.delta = 0
+        self.delta = [0]
 
     def _setup(self, graph, X):
         self.X = X
@@ -566,9 +567,9 @@ class GeneticAlgorithm():
         node_selection = np.random.choice(self.graph_size, self.graph_size)
         for n, node in enumerate(node_selection):
             self.population[c].adj_matrix[n, :] = \
-                self.population[node].adj_matrix[n, :]
+                self.population[c].adj_matrix[node, :]
 
-            self.population_BICs[c, n] = self.population_BICs[node, n]
+            self.population_BICs[c, n] = self.population_BICs[c, node]
 
         # After crossing over, make sure the resulting graph is acyclic.
         # Should that not be the case, try to make the graph acyclic.
