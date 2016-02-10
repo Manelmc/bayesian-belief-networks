@@ -1,5 +1,5 @@
 import numpy as np
-from random import *
+import random as rnd
 import math
 import copy as cp
 from scipy import sparse as sp
@@ -39,7 +39,7 @@ class Graph:
     def new_rnd(self):
         for n in range(self.size): 
             for m in range(self.size):
-                linker = uniform(0, 1)
+                linker = rnd.uniform(0, 1)
                 if (self.p_link > linker and 
                     n != m and 
                     self.adj_matrix[n, m] == 0 and
@@ -50,7 +50,7 @@ class Graph:
                 # switch edge direction at random
                 if (self.adj_matrix[n, m] == 1 and
                     np.sum(self.adj_matrix[m, :]) < self.max_parents):
-                    switcher = randint(0, 1)
+                    switcher = rnd.randint(0, 1)
                     if switcher == 1:
                         self.adj_matrix[n, m] = 0
                         self.adj_matrix[m, n] = 1
@@ -69,7 +69,7 @@ class Graph:
             # delete one parent of one node in each cycle
             # per iteration
             for c in cycles:
-                node_in_cycle = randint(0, len(c) - 1)
+                node_in_cycle = rnd.randint(0, len(c) - 1)
                 parents = np.where(self.adj_matrix[node_in_cycle,:] == 1)[0]
                 # Only consider deleting parents if they are in the cycle
                 parents = list(set(c)&set(parents))
@@ -80,7 +80,7 @@ class Graph:
                 if node_in_cycle not in self.last_changed_nodes:
                     self.last_changed_nodes.append(node_in_cycle)
 
-                parent_to_delete = randint(0, len(parents) -1 )
+                parent_to_delete = rnd.randint(0, len(parents) -1 )
 
                 self.adj_matrix[node_in_cycle, parents[parent_to_delete]] = 0
 
@@ -93,7 +93,7 @@ class Graph:
 
         nr_non_edges = len(non_edges)
 
-        edge_to_add = randint(0, nr_non_edges - 1)
+        edge_to_add = rnd.randint(0, nr_non_edges - 1)
 
         self.adj_matrix[non_edges[edge_to_add]] = 1
 
@@ -103,7 +103,7 @@ class Graph:
             counter += 1
             self.adj_matrix[non_edges[edge_to_add]] = 0
 
-            edge_to_add = randint(0, nr_non_edges - 1) 
+            edge_to_add = rnd.randint(0, nr_non_edges - 1)
 
             self.adj_matrix[non_edges[edge_to_add]] = 1  
 
@@ -119,7 +119,7 @@ class Graph:
 
         nr_edges = len(edges)
         assert nr_edges > 0, 'No edges in graph.'
-        edge_to_delete = randint(0, nr_edges - 1)
+        edge_to_delete = rnd.randint(0, nr_edges - 1)
 
         self.adj_matrix[edges[edge_to_delete]] = 0
         self.nodes_w_changed_BIC.append(edges[edge_to_delete][1])
@@ -131,7 +131,7 @@ class Graph:
         nr_edges = len(edges)
         assert nr_edges is not 0, 'No edges in graph.'
 
-        edge_to_reverse = randint(0, nr_edges - 1)
+        edge_to_reverse = rnd.randint(0, nr_edges - 1)
 
         self.adj_matrix[edges[edge_to_reverse]] = 0
         self.adj_matrix[edges[edge_to_reverse][::-1]] = 1
@@ -142,7 +142,7 @@ class Graph:
             self.adj_matrix[edges[edge_to_reverse]] = 1
             self.adj_matrix[edges[edge_to_reverse][::-1]] = 0  
 
-            edge_to_reverse = randint(0, nr_edges - 1) 
+            edge_to_reverse = rnd.randint(0, nr_edges - 1)
 
             self.adj_matrix[edges[edge_to_reverse]] = 0
             self.adj_matrix[edges[edge_to_reverse][::-1]] = 1  
@@ -397,7 +397,7 @@ class HillClimber():
 
     def step(self):
         self.new_graph.adj_matrix = cp.copy(self.best_graph.adj_matrix)
-        mode = randint(1, 3)
+        mode = rnd.randint(1, 3)
 
         if mode == 1:
             self.new_graph.add_edge()
@@ -442,7 +442,7 @@ class SimulatedAnnealing():
     def step(self):
         assert self.n_delete_fails < 20, 'There is no causal relation between the variables.'
         self.new_graph.adj_matrix = cp.copy(self.best_graph.adj_matrix)
-        mode = randint(1, 3)
+        mode = rnd.randint(1, 3)
         if mode == 1:
             self.new_graph.add_edge()
         elif mode == 2:
@@ -460,7 +460,7 @@ class SimulatedAnnealing():
             delta = abs(sum(new_score)) - abs(sum(self.best_score))
             p_accept = np.exp(-(delta) / self.temperature)
 
-            if uniform(0, 1) < p_accept:
+            if rnd.uniform(0, 1) < p_accept:
                 self.delta = abs(self.best_score - new_score)
                 self.best_score = new_score
                 self.best_graph.adj_matrix = cp.copy(self.new_graph.adj_matrix)  
@@ -504,7 +504,6 @@ class GeneticAlgorithm():
         self.best_score = self.population_BICs[index_best]
         self.best_graph = self.population[index_best]
 
-
     def step(self):
         assert self.n_delete_fails < 20*self.size_population,\
             'There is no causal relation between the variables.'
@@ -537,11 +536,11 @@ class GeneticAlgorithm():
     def mutate(self, m):
         """We mutate randomly chosen survivors by adding, deleting or
         reversing a randomly chosen edge"""
-        parent_index = randint(0, self.nr_survivors - 1)
+        parent_index = rnd.randint(0, self.nr_survivors - 1)
 
         offspring = cp.deepcopy(self.population[parent_index])
 
-        mode = randint(1, 3)
+        mode = rnd.randint(1, 3)
         if mode == 1:
             offspring.add_edge()
         elif mode == 2:
@@ -564,19 +563,20 @@ class GeneticAlgorithm():
     def crossover(self, c):
         """We crossover by choosing the parents of N nodes and merging
         in random order."""
-        node_selection = np.random.choice(self.graph_size, self.graph_size)
-        for n, node in enumerate(node_selection):
+        graph_selection = rnd.sample(xrange(self.size_population), self.graph_size)
+        for n, graph in enumerate(graph_selection):
             self.population[c].adj_matrix[n, :] = \
-                self.population[c].adj_matrix[node, :]
+                self.population[graph].adj_matrix[n, :]
 
-            self.population_BICs[c, n] = self.population_BICs[c, node]
+            self.population_BICs[c, n] = self.population_BICs[c, n]
 
         # After crossing over, make sure the resulting graph is acyclic.
         # Should that not be the case, try to make the graph acyclic.
         # If that fails create a new random graph.
         if not self.population[c].is_DAG():
-            try: 
+            try:
                 self.population[c].make_acyclic()
             except:
-                self.population[c].new_rnd() 
+                self.population[c].new_rnd()
+
             self.population_BICs[c, :] = self.population[c].BIC(self.X)

@@ -2,7 +2,8 @@ import bayesian.bbn as bg
 import bayesian.structure_learning as sl
 import numpy as np
 from scipy import random
-
+import networkx as nx
+import matplotlib.pyplot as plt
 
 
 if __name__ == '__main__':
@@ -34,8 +35,8 @@ if __name__ == '__main__':
     # Hyperparameters for the Genetic Algorithm
     size_initial_population = 20
     nr_survivors = 5
-    nr_crossovers = 8
-    nr_mutations = 7
+    nr_crossovers = 5
+    nr_mutations = 10
 
     initial_graph = sl.Graph(var_names, p_link, max_parents, bin_size)
 
@@ -44,6 +45,7 @@ if __name__ == '__main__':
                         nr_survivors,
                         nr_crossovers,
                         nr_mutations)
+    # learn_method = sl.SimulatedAnnealing()
 
     model = sl.StructureLearner(initial_graph, data, learn_method, max_iter)
     model.learn()
@@ -57,6 +59,10 @@ if __name__ == '__main__':
     # save the graph for each component in graphviz format
     # Show marginal probabilities
     for n, g in enumerate(graphs):
+        G = nx.DiGraph(g.adj_matrix.T)
+        nx.draw(G)
+        plt.show()
+
         bd = bg.build_bbn_from_data(g, X_list[n])
         bd.export('graph_%d.gv'%n)
         bd.q()
